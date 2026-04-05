@@ -19,6 +19,7 @@ import runpod
 from PIL import Image
 
 VLLM_URL = f"http://127.0.0.1:{os.getenv('VLLM_PORT', '8000')}/v1/chat/completions"
+VLLM_READY = os.getenv("VLLM_READY", "0") == "1"
 MODEL_NAME = "glm-ocr"  # matches --served-model-name in start.sh
 DEFAULT_PROMPT = "Text Recognition:"
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "32"))
@@ -90,6 +91,31 @@ async def _ocr_all(pages: list[tuple[int, Image.Image]], prompt: str, max_tokens
 def handler(event: dict[str, Any]) -> dict[str, Any]:
     t0 = time.time()
     payload = event.get("input", {}) or {}
+
+    # Diagnostic short-circuit: if caller sends {"diagnostic": true}, just report status
+    if payload.get("diagnostic"):
+        try:
+            r = httpx.get("http://127.0.0.1:8000/v1/models", timeout=5)
+            vllm_status = f"HTTP {r.status_code}: {r.text[:300]}"
+        except Exception as e:
+            vllm_status = f"unreachable: {e!r}"
+        import subprocess
+        smi = subprocess.run(["nvidia-smi","--query-gpu=name,memory.used,memory.total","--format=csv,noheader"], capture_output=True, text=True)
+        return {
+            "vllm_ready_env": VLLM_READY,
+            "vllm_http_status": vllm_status,
+            "gpu": smi.stdout.strip(),
+            "env_model_path": os.getenv("MODEL_PATH"),
+        }
+
+    if not VLLM_READY:
+        # Try once more in case it came up after handler boot
+        try:
+            r = httpx.get("http://127.0.0.1:8000/v1/models", timeout=5)
+            if r.status_code != 200:
+                return {"error": f"vLLM not ready: HTTP {r.status_code}: {r.text[:500]}"}
+        except Exception as e:
+            return {"error": f"vLLM unreachable: {e!r}"}
 
     prompt = payload.get("prompt", DEFAULT_PROMPT)
     max_new_tokens = int(payload.get("max_new_tokens", 1024))
