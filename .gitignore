@@ -1,0 +1,8 @@
+.env
+.venv
+__pycache__
+*.pyc
+output/
+samples/*.pdf
+!samples/.gitkeep
+.DS_Store

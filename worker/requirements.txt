@@ -1,0 +1,6 @@
+runpod>=1.7.0
+transformers>=4.46.0
+accelerate>=1.0.0
+pillow>=10.4.0
+pymupdf>=1.24.0
+torch>=2.4.0
